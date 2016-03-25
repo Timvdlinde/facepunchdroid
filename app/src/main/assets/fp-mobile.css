@@ -169,8 +169,13 @@ table#threads tr.threadlisthead td {
 
 /* Pagination */
 .pagination span a {
-	font-size: 0.9230769230769231em !important;
+    font-size: 0.9230769230769231em !important;
     padding: 4px 6px 4px 6px !important;
+}
+
+.pagination  {
+    overflow-x: scroll;
+    max-width: 100%;
 }
 
 #above_postlist {
@@ -189,6 +194,7 @@ div#below_threadlist div.threadpagenav {
  	margin: 0px;
 }
 
+/* Pagination END */
 
 /* thread */
 ol#posts .postbitlegacy .postdetails .video {
@@ -213,11 +219,6 @@ ol#posts .postbitlegacy .postdetails .postbody .postcontent {
     padding-right: 10px;
     font-size: 1.0037500100376em;
 }
-.pagination  {
-	overflow-x: scroll;
-    max-width: 100%;
-}
-
 
 /* Quotes */
 ol#posts .postbitlegacy .postdetails .postbody .postcontent .quote {
