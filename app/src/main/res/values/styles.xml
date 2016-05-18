@@ -6,7 +6,19 @@
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
-        <item name="material_drawer_primary_icon">#FFFFFF</item>
+    </style>
+
+    <style name="AppThemeDark" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/nightColorPrimary</item>
+        <item name="colorPrimaryDark">@color/nightColorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+
+        <item name="material_drawer_background">@color/nightDrawerBackground</item>
+        <item name="material_drawer_primary_text">@color/nightDrawerPrimaryText</item>
+        <item name="material_drawer_primary_icon">@color/nightDrawerPrimaryIcon</item>
+        <item name="material_drawer_secondary_text">@color/nightDrawerSecondaryText</item>
+
     </style>
 
     <style name="AppThemeSettings" parent="Theme.AppCompat.Light.DarkActionBar">
@@ -15,6 +27,14 @@
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
     </style>
+
+    <style name="AppThemeSettingsDark" parent="ThemeOverlay.AppCompat.Dark.ActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/nightColorPrimary</item>
+        <item name="colorPrimaryDark">@color/nightColorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
 
     <style name="AppThemeEditPinnedItems" parent="Theme.AppCompat.Light.DarkActionBar">
         <!-- Customize your theme here. -->
@@ -40,9 +60,9 @@
     </style>
 
     <style name="MyActionBarTheme" parent="@style/Widget.AppCompat.ActionBar">
-        <item name="android:background">@android:color/transparent</item>
+        <item name="android:background">@color/ImageViewerBackground</item>
         <!-- Support library compatibility -->
-        <item name="background">@android:color/transparent</item>
+        <item name="background">@color/ImageViewerBackground</item>
         <item name="android:windowActionBarOverlay">true</item>
 
         <!-- Support library compatibility -->
@@ -61,6 +81,10 @@
     <style name="myDialog" parent="Theme.AppCompat.Dialog">
         <item name="android:windowNoTitle">false</item>
         ...
+    </style>
+
+    <style name="BottomToolbar" parent="ThemeOverlay.AppCompat.ActionBar">
+        <item name="android:textColorPrimary">#FFFFFF</item>
     </style>
 
 

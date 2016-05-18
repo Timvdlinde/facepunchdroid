@@ -9,8 +9,26 @@
             android:title="@string/action_refresh"
             android:icon="@drawable/ic_refresh_white_24dp"
             app:showAsAction="always"/>
+        <item android:id="@+id/forward"
+            android:title="@string/action_forward"
+            app:showAsAction="never"/>
         <item android:id="@+id/pinpage"
-                android:title="Pin to drawer"
+                android:title="@string/action_pin_to_drawer"
                 app:showAsAction="never"/>
+        <item android:id="@+id/openinbrowser"
+            android:title="@string/action_open_in_browser"
+            app:showAsAction="never"/>
+        <item android:id="@+id/sharepage"
+            android:title="@string/action_share"
+            app:showAsAction="never"/>
+        <item android:id="@+id/setasstartpage"
+            android:title="@string/action_set_as_start_page"
+            app:showAsAction="never"/>
+        <item
+            android:id="@+id/dissableAllImages"
+            android:title="@string/action_disable_images"
+            android:checkable="true"
+            app:showAsAction="never"
+                />
 
 </menu>

@@ -2,40 +2,65 @@ package com.apps.anker.facepunchdroid;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.app.Activity;
+import android.app.Dialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.net.MailTo;
 import android.net.Uri;
 import android.os.Build;
 import android.preference.PreferenceManager;
+import android.provider.Settings;
 import android.support.design.widget.Snackbar;
+import android.support.v4.content.ContextCompat;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.support.v7.view.ContextThemeWrapper;
 import android.support.v7.widget.Toolbar;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.animation.AccelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.NumberPicker;
+import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
+import android.widget.Spinner;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import com.apps.anker.facepunchdroid.Tools.Assets;
+import com.apps.anker.facepunchdroid.Tools.Language;
+import com.apps.anker.facepunchdroid.Tools.UriHandling;
+import com.apps.anker.facepunchdroid.Webview.ObservableWebView;
 import com.koushikdutta.ion.Ion;
+import com.mikepenz.google_material_typeface_library.GoogleMaterial;
 import com.mikepenz.materialdrawer.AccountHeader;
 import com.mikepenz.materialdrawer.AccountHeaderBuilder;
 import com.mikepenz.materialdrawer.Drawer;
@@ -50,16 +75,33 @@ import com.mikepenz.materialdrawer.model.interfaces.IProfile;
 import com.mikepenz.materialdrawer.util.AbstractDrawerImageLoader;
 import com.mikepenz.materialdrawer.util.DrawerImageLoader;
 import com.mikhaellopez.circularprogressbar.CircularProgressBar;
-import com.orm.query.Select;
 
+
+import java.io.ByteArrayInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.SequenceInputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
+
+import biz.kasual.materialnumberpicker.MaterialNumberPicker;
+import io.realm.Realm;
+import io.realm.RealmConfiguration;
+import io.realm.RealmResults;
+
 
 public class MainActivity extends AppCompatActivity {
 
     String baseURL = "https://facepunch.com/";
-    WebView webview;
-    CircularProgressBar pb;
+    ObservableWebView webview;
+    ProgressBar pb;
     RelativeLayout pbc;
     private boolean isInjected;
     String CSSfromfile;
@@ -67,16 +109,34 @@ public class MainActivity extends AppCompatActivity {
     String Jquery;
     Boolean loginStatus;
 
+    Toolbar toolbar_bottom;
+
+    Integer currentpage;
+    Integer totalpages;
+
+    MenuItem addstartpage;
+    SharedPreferences.OnSharedPreferenceChangeListener spChanged;
+
+    Integer oldScrollPos = 0;
+    Boolean paginationEnabled = false;
+    Boolean paginationHidden = true;
+
 
     private int mShortAnimationDuration;
 
     private SharedPreferences sharedPref;
 
     boolean useCustomStyles;
+    boolean enableDarkTheme;
+    String selectedLang;
 
     SwipeRefreshLayout mSwipeRefreshLayout;
     Toolbar toolbar;
     private String mActivityTitle;
+
+    // Pinned items
+    RealmConfiguration realmConfig;
+    Realm realm;
 
     // Drawer
     Drawer drawer;
@@ -86,26 +146,54 @@ public class MainActivity extends AppCompatActivity {
     // Drawer items
     PrimaryDrawerItem nav_logout;
 
+    Activity mActivity;
+    Context mContext;
+
+    Boolean dissableAllImages = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        sharedPref = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+
+        enableDarkTheme = sharedPref.getBoolean("enable_dark_theme", false);
+        Log.d("DarkTheme", String.valueOf(enableDarkTheme));
+
+        // Update language
+        selectedLang = sharedPref.getString("language", "system");
+        Language.setLanguage(selectedLang, getResources());
+
+        // Set dark theme if enabled dark mode
+        if(enableDarkTheme) {
+            super.setTheme(R.style.AppThemeDark);
+        }
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        mActivity = this;
+        mContext = getApplicationContext();
 
-        sharedPref = PreferenceManager.getDefaultSharedPreferences(this);
+        // Create the Realm configuration
+        realmConfig = new RealmConfiguration.Builder(this).build();
+        // Open the Realm for the UI thread.
+        realm = Realm.getInstance(realmConfig);
 
 
-        SharedPreferences.OnSharedPreferenceChangeListener spChanged = new
-                SharedPreferences.OnSharedPreferenceChangeListener() {
+
+        spChanged = new SharedPreferences.OnSharedPreferenceChangeListener() {
                     @Override
                     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences,
                                                           String key) {
+                        Log.d("Sharedpref changed", key);
                         switch (key) {
                             case "enable_custom_styles":
                                 webview.reload();
                                 break;
                             case "custom_style_file":
                                 webview.reload();
+                                break;
+                            case "enable_custom_startpage":
+                                invalidateOptionsMenu();
                                 break;
                         }
 
@@ -116,9 +204,13 @@ public class MainActivity extends AppCompatActivity {
 
 
 
+
         // Setup Drawer
         setupToolbar();
         setupDrawer();
+
+
+
 
         mActivityTitle = getTitle().toString();
 
@@ -136,9 +228,34 @@ public class MainActivity extends AppCompatActivity {
                 android.R.integer.config_shortAnimTime);
 
         // Progressbar and WebView
-        pb = (CircularProgressBar) findViewById(R.id.progressBar);
-        pbc = (RelativeLayout) findViewById(R.id.progressBarContainer);
-        webview = (WebView) findViewById(R.id.webView);
+        pb = (ProgressBar) findViewById(R.id.toolbarProgressbar);
+        webview = (com.apps.anker.facepunchdroid.Webview.ObservableWebView) findViewById(R.id.webView);
+
+
+
+
+        // On Scroll handling
+        webview.setOnScrollChangedCallback(new ObservableWebView.OnScrollChangedCallback(){
+            public void onScroll(int l, int t,int oldl, int oldt){
+                //Do stuff
+
+                if(oldScrollPos != t && paginationEnabled)
+                {
+                    Log.d("Scroll pos", "Changed");
+                    if (oldScrollPos < t) {
+                        Log.d("Scroll pos", "Scrolling down");
+                        if(paginationEnabled && !paginationHidden) { hideViews(); }
+
+                    }
+                    else if (oldScrollPos > t) {
+                        Log.d("Scroll pos", "Scrolling up");
+                        if(paginationEnabled && paginationHidden) { showViews(); }
+                    }
+                }
+                oldScrollPos = t;
+            }
+        });
+
 
 
         // Setup Webview
@@ -152,9 +269,12 @@ public class MainActivity extends AppCompatActivity {
                     Log.d("useCustomStyles", String.valueOf(useCustomStyles));
                 }
 
-                // Hide webview and show progressbar
+                // Show progressbar
                 pb.setProgress(0);
-                crossfadeToLoader();
+                pb.setVisibility(View.VISIBLE);
+                mSwipeRefreshLayout.setRefreshing(true);
+                mSwipeRefreshLayout.setColorSchemeResources(R.color.colorPrimary);
+
 
                 Log.d("Webview", "onPageStarted " + url);
 
@@ -167,8 +287,139 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public WebResourceResponse shouldInterceptRequest (final WebView view, String url) {
+                Log.d("WebResource", url);
+                if(dissableAllImages && !url.contains("facepunch.com")) {
+                    Log.d("WebResource", "DISABLE IMAGE");
+                    if(url.contains(".jpg") || url.contains(".png") || url.contains(".jpeg") || url.contains(".gif") ) {
+                        Log.d("WebResource", "IMAGE DISABLED");
+                        return new WebResourceResponse("text/html", "UTF-8", null);
+                    }
+                }
+
+                if (url.contains("small.css")) {
+                    return getCssWebResourceResponseFromAsset();
+                } else if (url.contains("fp.js")) {
+                    Log.d("Intercept", "fp.js file");
+                    return getJsWebResourceResponseFromAsset();
+                } else {
+                    return super.shouldInterceptRequest(view, url);
+                }
+            }
+
+            private WebResourceResponse getCssWebResourceResponseFromAsset() {
+                try {
+                    WebResourceResponse fullCSS = null;
+                    String fullCSSString = "";
+
+
+                    // Inject darktheme
+                    if(enableDarkTheme) {
+                        Log.d("Darktheme", "USE DARKTHEME");
+
+                        fullCSSString += customCSS.cssToString(getAssets().open("dark_theme.css"));
+                    }
+
+                    // Inject Mobile style
+                    fullCSSString += customCSS.cssToString(getAssets().open("fpstyle.css"));
+
+                    // Check if custom user style is enabled
+                    if(useCustomStyles && sharedPref.contains("custom_style_file")) {
+                        fullCSSString += sharedPref.getString("custom_style_file", "");
+                    }
+
+                    Log.d("FullCSS", fullCSSString);
+                    fullCSS = stringToWebResource(fullCSSString);
+
+                    return fullCSS;
+                } catch (IOException e) {
+                    return null;
+                }
+            }
+
+
+
+            private WebResourceResponse getUtf8EncodedCssWebResourceResponse(InputStream data) {
+                return new WebResourceResponse("text/css", "UTF-8", data);
+            }
+
+            private WebResourceResponse stringToWebResource(String CSS) {
+                return new WebResourceResponse("text/css", "UTF-8", new ByteArrayInputStream(CSS.getBytes(StandardCharsets.UTF_8)));
+            }
+
+            private WebResourceResponse getUtf8EncodedCssAndCustomWebResourceResponse(InputStream data, String CSS) {
+                return new WebResourceResponse("text/css", "UTF-8", new SequenceInputStream(data, new ByteArrayInputStream(CSS.getBytes(StandardCharsets.UTF_8))));
+            }
+
+            private WebResourceResponse getUtf8EncodedJsWebResourceResponse(InputStream data) {
+                return new WebResourceResponse("text/javascript ", "UTF-8", data);
+            }
+
+            private WebResourceResponse getJsWebResourceResponseFromAsset() {
+                try {
+                    Log.d("Intercept", getUtf8EncodedJsWebResourceResponse(getAssets().open("fp-mobile.js")).toString());
+                    return getUtf8EncodedJsWebResourceResponse(getAssets().open("fp-mobile.js"));
+                } catch (IOException e) {
+                    return null;
+                }
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 //view.loadUrl(url);
+
+                // Handle direct image links
+                if(url.endsWith(".jpg")  ||
+                        url.endsWith(".jpeg") ||
+                        url.endsWith(".png")  ||
+                        url.endsWith(".gif") ) {
+
+                    Intent i = new Intent(mContext, ImageViewer.class);
+                    i.putExtra("url", url);
+                    mActivity.startActivity(i);
+                    return true;
+                }
+
+                if(url.startsWith("https://facepunch.com/misc.php")) {
+                    //Toast.makeText(getApplicationContext(), "Show smiley dialog", Toast.LENGTH_LONG).show();
+
+                    AlertDialog.Builder builder = new AlertDialog.Builder(mActivity);
+                    LayoutInflater inflater = mActivity.getLayoutInflater();
+
+                    View dialog_view = inflater.inflate(R.layout.smiley_dialog, null);
+
+                    // set the custom dialog components - text, image and button
+                    WebView sWebview = (WebView) dialog_view.findViewById(R.id.smiley_webview);
+                    sWebview.getSettings().setJavaScriptEnabled(true);
+                    sWebview.setWebContentsDebuggingEnabled(true);
+                    sWebview.addJavascriptInterface(new WebAppInterface(mActivity), "Android");
+                    sWebview.loadUrl("file:///android_asset/smileys.html");
+
+
+                    builder.setTitle(getString(R.string.select_smiley));
+                    builder.setView(dialog_view);
+                    builder.setPositiveButton(getString(R.string.action_close), new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int id) {
+                            dialog.cancel();
+                        }
+                    });
+
+                    builder.create().show();
+
+                    return true;
+                }
+
+                if (url.startsWith("mailto:")) {
+                    MailTo mt = MailTo.parse(url);
+                    Intent intent = new Intent(Intent.ACTION_SEND);
+                    intent.putExtra(Intent.EXTRA_EMAIL, new String[] { mt.getTo() });
+                    intent.setType("message/rfc822");
+                    startActivity(intent);
+                    return true;
+                }
+
+
                 String urlHost = Uri.parse(url).getHost();
                 Log.d("Webview", "ShouldOverrideURLloading " + url );
                 switch (urlHost) {
@@ -186,36 +437,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onLoadResource(WebView view, String url) {
                 super.onLoadResource(view, url);
-                Log.d("Resource", url);
-                pb.setProgressWithAnimation(webview.getProgress());
-                Log.d("Progress", String.valueOf(webview.getProgress()));
+
+                pb.setProgress(webview.getProgress());
+
+
 
 
                 // Need a better way to detect if DOM is ready to inject CSS
-                if (webview.getProgress() > 25 && !isInjected) {
-                    Log.d("Progress", "INJECT!!");
-                    String jquery = "javascript:" + Jquery;
-                    view.loadUrl(jquery);
+                if (webview.getProgress() > 30 && !isInjected) {
 
-                    String javascript = "javascript:" + JSfromfile;
-                    view.loadUrl(javascript);
-
-                    // Inject CSS
-                    String injectCSS = "javascript:var css=\"" + CSSfromfile + "\",head=document.head;style=document.createElement(\"style\"),style.type=\"text/css\",style.appendChild(document.createTextNode(css)),head.appendChild(style);";
-                    view.loadUrl(injectCSS);
-
-
-                    if(useCustomStyles) {
-                        if(sharedPref.contains("custom_style_file")) {
-                            String filePath = sharedPref.getString("custom_style_file", "");
-                            Log.d("CUSTOM CSS", String.valueOf(Uri.parse(filePath)));
-                            String userCustomCSS = customCSS.readFromSDcard(sharedPref.getString("custom_style_file", ""));
-                            String injectUserCSS = "javascript:var css=\"" + userCustomCSS + "\",head=document.head;style=document.createElement(\"style\"),style.type=\"text/css\",style.appendChild(document.createTextNode(css)),head.appendChild(style);";
-                            Log.d("Injected css", injectUserCSS);
-                            view.loadUrl(injectUserCSS);
-                        }
-
-                    }
                     isInjected = true;
 
 
@@ -229,7 +459,14 @@ public class MainActivity extends AppCompatActivity {
                 // Change Actionbar Title
                 mActivityTitle = webview.getTitle();
                 toolbar.setTitle(mActivityTitle);
+
+
+                pb.setVisibility(View.GONE);
+                mSwipeRefreshLayout.setRefreshing(false);
+
             }
+
+
         });
 
         webview.setWebChromeClient(new WebChromeClient());
@@ -238,6 +475,10 @@ public class MainActivity extends AppCompatActivity {
         webview.getSettings().setJavaScriptEnabled(true);
         webview.getSettings().setLoadWithOverviewMode(true);
         webview.getSettings().setUseWideViewPort(false);
+
+        if(enableDarkTheme) {
+            webview.setBackgroundColor(ContextCompat.getColor(getApplicationContext(), R.color.nightDrawerBackground));
+        }
 
         // Set new UA
         String ua = webview.getSettings().getUserAgentString();
@@ -249,10 +490,20 @@ public class MainActivity extends AppCompatActivity {
             webview.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         }
 
-        if (savedInstanceState != null)
+        // First load
+        if (savedInstanceState != null) {
             webview.restoreState(savedInstanceState);
-        else
-            webview.loadUrl(baseURL);
+        }
+        else {
+            if( sharedPref.getBoolean("enable_custom_startpage", false) && sharedPref.contains("current_startpage"))
+            {
+                webview.loadUrl(sharedPref.getString("current_startpage", baseURL));
+            }
+            else {
+                webview.loadUrl(baseURL);
+            }
+
+        }
 
         // Handle Share to intent
         // Get intent, action and MIME type
@@ -276,26 +527,39 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onRefresh() {
                 webview.reload();
-                mSwipeRefreshLayout.setRefreshing(false);
+
 
             }
 
         });
 
+        setupBottomToolbar();
 
+
+    }
+
+
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        sharedPref.unregisterOnSharedPreferenceChangeListener(spChanged);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         webview.onPause();
+        sharedPref.unregisterOnSharedPreferenceChangeListener(spChanged);
     }
 
     @Override
     protected void onResume() {
+        Language.setLanguage(selectedLang, getResources());
         super.onResume();
         webview.onResume();
         refreshDrawerItems();
+        sharedPref.registerOnSharedPreferenceChangeListener(spChanged);
     }
 
 
@@ -304,6 +568,9 @@ public class MainActivity extends AppCompatActivity {
         webview.saveState(outState);
     }
 
+    /**
+     * Setups the drawer, with all styles and user picture
+     */
     private void setupDrawer() {
         // Setup Profile
         if(sharedPref.getBoolean("isLoggedIn", false)) {
@@ -311,7 +578,7 @@ public class MainActivity extends AppCompatActivity {
             String userid = sharedPref.getString("userid", "");
             defaultProfile = new ProfileDrawerItem().withName(username).withIcon("https://facepunch.com/image.php?u="+userid);;
         } else {
-            defaultProfile = new ProfileDrawerItem().withName("Not logged in");
+            defaultProfile = new ProfileDrawerItem().withName(getString(R.string.not_logged_in));
         }
 
 
@@ -322,7 +589,6 @@ public class MainActivity extends AppCompatActivity {
                 .withHeaderBackground(R.drawable.cover)
                 .withCompactStyle(true)
                 .withSelectionListEnabledForSingleProfile(false)
-
                 .addProfiles(
                         defaultProfile
                 )
@@ -350,6 +616,7 @@ public class MainActivity extends AppCompatActivity {
                 imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 Ion.with(imageView.getContext())
                         .load(uri.toString())
+                        .noCache()
                         .withBitmap()
                         .placeholder(R.drawable.placeholder)
                         .intoImageView(imageView);
@@ -391,8 +658,8 @@ public class MainActivity extends AppCompatActivity {
                             webview.loadUrl(baseURL + "usercp.php");
                         } else if (id == 9) {
                             AlertDialog.Builder builder = new AlertDialog.Builder(new ContextThemeWrapper(MainActivity.this, R.style.myDialog));
-                            builder.setMessage("Are you sure you want to log out?")
-                                    .setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                            builder.setMessage(getString(R.string.logout_description))
+                                    .setPositiveButton(R.string.answer_yes, new DialogInterface.OnClickListener() {
                                         public void onClick(DialogInterface dialog, int id) {
                                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                                                 CookieManager.getInstance().removeAllCookies(null);
@@ -402,7 +669,7 @@ public class MainActivity extends AppCompatActivity {
                                             webview.loadUrl(baseURL);
                                         }
                                     })
-                                    .setNegativeButton("No", new DialogInterface.OnClickListener() {
+                                    .setNegativeButton(R.string.answer_no, new DialogInterface.OnClickListener() {
                                         public void onClick(DialogInterface dialog, int id) {
                                             // User cancelled the dialog
                                         }
@@ -418,6 +685,8 @@ public class MainActivity extends AppCompatActivity {
                         } else if (id == 11) {
                             Intent i = new Intent(getBaseContext(), EditPinnedItemsActivity.class);
                             startActivityForResult(i, 1);
+                        } else if (id == 12) { // Ticker
+                            webview.loadUrl(baseURL + "fp_ticker.php");
                         }
 
 
@@ -433,24 +702,27 @@ public class MainActivity extends AppCompatActivity {
     protected void addDrawerItems() {
 
         //if you want to update the items at a later time it is recommended to keep it in a variable
-        PrimaryDrawerItem nav_home      = new PrimaryDrawerItem().withIdentifier(1).withName("Home").withIcon(R.drawable.ic_home_black_24dp).withSelectable(false);
-        PrimaryDrawerItem nav_events    = new PrimaryDrawerItem().withIdentifier(2).withName("Events").withIcon(R.drawable.ic_event_black_24dp).withSelectable(false);
-        PrimaryDrawerItem nav_popular   = new PrimaryDrawerItem().withIdentifier(3).withName("Popular").withIcon(R.drawable.ic_favorite_black_24dp).withSelectable(false);
-        PrimaryDrawerItem nav_read      = new PrimaryDrawerItem().withIdentifier(4).withName("Read").withIcon(R.drawable.ic_markunread_mailbox_black_24dp).withSelectable(false);
-        PrimaryDrawerItem nav_search    = new PrimaryDrawerItem().withIdentifier(5).withName("Search").withIcon(R.drawable.ic_search_black_24dp).withSelectable(false);
-        PrimaryDrawerItem nav_messages  = new PrimaryDrawerItem().withIdentifier(6).withName("Messages").withIcon(R.drawable.ic_mail_outline_black_24dp).withSelectable(false);
-        PrimaryDrawerItem nav_cpanel    = new PrimaryDrawerItem().withIdentifier(7).withName("Control panel").withIcon(R.drawable.ic_build_black_24dp).withSelectable(false);
+        PrimaryDrawerItem nav_home      = new PrimaryDrawerItem().withIdentifier(1).withName(getString(R.string.nav_home)).withIcon(GoogleMaterial.Icon.gmd_home).withSelectable(false);
+        PrimaryDrawerItem nav_events    = new PrimaryDrawerItem().withIdentifier(2).withName(getString(R.string.nav_events)).withIcon(GoogleMaterial.Icon.gmd_event).withSelectable(false);
+        PrimaryDrawerItem nav_popular   = new PrimaryDrawerItem().withIdentifier(3).withName(getString(R.string.nav_popular)).withIcon(GoogleMaterial.Icon.gmd_favorite).withSelectable(false);
+        PrimaryDrawerItem nav_read      = new PrimaryDrawerItem().withIdentifier(4).withName(getString(R.string.nav_read)).withIcon(GoogleMaterial.Icon.gmd_markunread_mailbox).withSelectable(false);
+        PrimaryDrawerItem nav_search    = new PrimaryDrawerItem().withIdentifier(5).withName(getString(R.string.nav_search)).withIcon(GoogleMaterial.Icon.gmd_search).withSelectable(false);
+        PrimaryDrawerItem nav_messages  = new PrimaryDrawerItem().withIdentifier(6).withName(getString(R.string.nav_messages)).withIcon(GoogleMaterial.Icon.gmd_mail_outline).withSelectable(false);
+        PrimaryDrawerItem nav_cpanel    = new PrimaryDrawerItem().withIdentifier(7).withName(getString(R.string.nav_controlpanel)).withIcon(GoogleMaterial.Icon.gmd_build).withSelectable(false);
+        PrimaryDrawerItem nav_ticker    = new PrimaryDrawerItem().withIdentifier(12).withName(getString(R.string.nav_ticker)).withIcon(GoogleMaterial.Icon.gmd_link).withSelectable(false);
 
-        PrimaryDrawerItem nav_settings  = new PrimaryDrawerItem().withIdentifier(8).withName("Settings").withIcon(R.drawable.ic_settings_black_24dp).withSelectable(false);
+        PrimaryDrawerItem nav_settings  = new PrimaryDrawerItem().withIdentifier(8).withName(getString(R.string.action_settings)).withIcon(GoogleMaterial.Icon.gmd_settings).withSelectable(false);
 
         if(sharedPref.getBoolean("isLoggedIn", false)) {
-            nav_logout    = new PrimaryDrawerItem().withIdentifier(9).withName("Logout").withIcon(R.drawable.ic_lock_open_black_24dp).withSelectable(false).withEnabled(true);
+            nav_logout    = new PrimaryDrawerItem().withIdentifier(9).withName(getString(R.string.nav_logout)).withIcon(GoogleMaterial.Icon.gmd_lock_open).withSelectable(false).withEnabled(true);
         } else {
-            nav_logout    = new PrimaryDrawerItem().withIdentifier(9).withName("Logout").withIcon(R.drawable.ic_lock_open_black_24dp).withSelectable(false).withEnabled(false);
+            nav_logout    = new PrimaryDrawerItem().withIdentifier(9).withName(getString(R.string.nav_logout)).withIcon(GoogleMaterial.Icon.gmd_lock_open).withSelectable(false).withEnabled(false);
         }
 
 
-        PrimaryDrawerItem nav_donate    = new PrimaryDrawerItem().withIdentifier(10).withName("Donate").withIcon(R.drawable.ic_card_giftcard_black_24dp).withSelectable(false);
+        PrimaryDrawerItem nav_donate    = new PrimaryDrawerItem().withIdentifier(10).withName(getString(R.string.nav_donate)).withIcon(GoogleMaterial.Icon.gmd_card_giftcard).withSelectable(false);
+
+
         drawer.addItems(
                 nav_home,
                 nav_events,
@@ -458,18 +730,21 @@ public class MainActivity extends AppCompatActivity {
                 nav_read,
                 nav_search,
                 nav_messages,
-                nav_cpanel
+                nav_cpanel,
+                nav_ticker
         );
 
         // Get Pinned items
-        List<PinnedItem> pinnedItems = PinnedItem.listAll(PinnedItem.class);
+        RealmResults<PinnedItem> pinnedItems = realm.where(PinnedItem.class).findAll();
 
+        Log.d("Pitem list", pinnedItems.toString());
 
         if(pinnedItems.size() > 0) {
-            drawer.addItem(new SectionDrawerItem().withName("Pinned pages"));
+            drawer.addItem(new SectionDrawerItem().withName(getString(R.string.nav_pinnedpages)));
             for (PinnedItem pitem : pinnedItems)
             {
-                drawer.addItem(new PrimaryDrawerItem().withName(pitem.title).withSelectable(false).withTag(pitem.url).withOnDrawerItemClickListener(new Drawer.OnDrawerItemClickListener() {
+
+                drawer.addItem(new PrimaryDrawerItem().withName(pitem.getTitle()).withSelectable(false).withTag(pitem.getUrl()).withOnDrawerItemClickListener(new Drawer.OnDrawerItemClickListener() {
                     @Override
                     public boolean onItemClick(View view, int position, IDrawerItem drawerItem) {
                         webview.loadUrl(drawerItem.getTag().toString());
@@ -477,7 +752,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }));
             }
-            drawer.addItem(new SecondaryDrawerItem().withName("Edit pinned items").withIcon(R.drawable.ic_edit_black_24dp).withIdentifier(11).withSelectable(false));
+            drawer.addItem(new SecondaryDrawerItem().withName(getString(R.string.nav_editpinnedpages)).withIcon(GoogleMaterial.Icon.gmd_edit).withIdentifier(11).withSelectable(false));
         }
 
         drawer.addItem(new DividerDrawerItem());
@@ -509,20 +784,64 @@ public class MainActivity extends AppCompatActivity {
         toolbar = (Toolbar) findViewById(R.id.mActionbar);
         setSupportActionBar(toolbar);
 
+
+
+
+
         toolbar.setOnMenuItemClickListener(new Toolbar.OnMenuItemClickListener() {
             @Override
             public boolean onMenuItemClick(MenuItem item) {
                 switch (item.getItemId()) {
+                    case R.id.forward:
+                        if(webview.canGoForward())
+                            webview.goForward();
+                        return true;
                     case R.id.action_refresh:
                         webview.reload();
                         return true;
                     case R.id.pinpage:
-                        PinnedItem pinitem = new PinnedItem(webview.getTitle(), webview.getUrl());
-                        pinitem.save();
+                        realm.beginTransaction();
+
+                        // Add a person
+                        PinnedItem pinitem = realm.createObject(PinnedItem.class);
+
+                        pinitem.setTitle(webview.getTitle());
+                        pinitem.setUrl(webview.getUrl());
+                        realm.commitTransaction();
 
                         SwipeRefreshLayout mlayout = (SwipeRefreshLayout) findViewById(R.id.refresh);
-                        Snackbar.make(mlayout,"Page was pinned", Snackbar.LENGTH_LONG).show();
+                        Snackbar.make(mlayout, getString(R.string.paged_was_pinned), Snackbar.LENGTH_LONG).show();
                         refreshDrawerItems();
+                        return true;
+                    case R.id.openinbrowser:
+                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(webview.getUrl()));
+                        startActivity(intent);
+                        return true;
+                    case R.id.sharepage:
+                        Intent sendIntent = new Intent();
+                        sendIntent.setAction(Intent.ACTION_SEND);
+                        sendIntent.putExtra(Intent.EXTRA_TEXT, webview.getUrl());
+                        sendIntent.setType("text/plain");
+                        startActivity(sendIntent);
+                        return true;
+                    case R.id.setasstartpage:
+                        // Save new startpage
+                        final SharedPreferences.Editor editor = sharedPref.edit();
+                        editor.putString("current_startpage", webview.getUrl());
+                        editor.apply();
+
+                        // Show snackbar
+                        SwipeRefreshLayout mlayout2 = (SwipeRefreshLayout) findViewById(R.id.refresh);
+                        Snackbar.make(mlayout2, getString(R.string.new_startpage_set), Snackbar.LENGTH_LONG).show();
+                        return true;
+                    case R.id.dissableAllImages:
+                        if(dissableAllImages) {
+                            dissableAllImages = false;
+                        } else {
+                            dissableAllImages = true;
+                        }
+                        mActivity.invalidateOptionsMenu();
+                        webview.reload();
                         return true;
                     default:
                         return false;
@@ -532,12 +851,102 @@ public class MainActivity extends AppCompatActivity {
 
         // Inflate a menu to be displayed in the toolbar
         toolbar.inflateMenu(R.menu.activity_main_actionbar);
+
+
+
+
+
     }
+
+    public void setupBottomToolbar() {
+        toolbar_bottom = (Toolbar) findViewById(R.id.toolbar_bottom);
+
+        hideViews();
+
+        toolbar_bottom.inflateMenu(R.menu.activity_main_actionbar_bottom);//changed
+        //toolbar2 menu items CallBack listener
+        toolbar_bottom.setOnMenuItemClickListener(new Toolbar.OnMenuItemClickListener() {
+
+            @Override
+            public boolean onMenuItemClick(MenuItem item) {
+                switch(item.getItemId()) {
+                    case(R.id.action_nextpage):
+                        if(currentpage < totalpages) {
+                            Integer nextpage = currentpage + 1;
+                            webview.loadUrl(UriHandling.replaceUriParameter(Uri.parse(webview.getUrl()), "page", nextpage.toString()).toString());
+                        }
+                        break;
+                    case(R.id.action_prevpage):
+                        if(currentpage > 1)
+                        {
+                            Integer prevpage = currentpage-1;
+                            webview.loadUrl(UriHandling.replaceUriParameter(Uri.parse(webview.getUrl()), "page", prevpage.toString()).toString());
+                        }
+                        break;
+                    case(R.id.gotopage):
+                        final MaterialNumberPicker numberPicker = new MaterialNumberPicker.Builder(getApplicationContext())
+                                .minValue(1)
+                                .maxValue(totalpages)
+                                .defaultValue(currentpage)
+                                .backgroundColor(Color.WHITE)
+                                .separatorColor(Color.TRANSPARENT)
+                                .textColor(Color.BLACK)
+                                .textSize(20)
+                                .enableFocusability(true)
+                                .wrapSelectorWheel(false)
+                                .build();
+
+                        new AlertDialog.Builder(mActivity)
+                                .setTitle(getString(R.string.go_to_page))
+                                .setView(numberPicker)
+                                .setPositiveButton(getString(android.R.string.ok), new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface dialog, int which) {
+                                        SwipeRefreshLayout mlayout = (SwipeRefreshLayout) findViewById(R.id.refresh);
+                                        //Snackbar.make(mlayout, "You picked : " + numberPicker.getValue(), Snackbar.LENGTH_LONG).show();
+
+                                        Uri newUrl = UriHandling.replaceUriParameter(Uri.parse(webview.getUrl()), "page", String.valueOf(numberPicker.getValue()) );
+
+                                        webview.loadUrl(newUrl.toString());
+
+                                    }
+                                })
+                                .show();
+                        break;
+                }
+
+                return false;
+            }
+        });
+    }
+
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.activity_main_actionbar, menu);
+
+
+        Log.d("Toolbar", String.valueOf(sharedPref.getBoolean("enable_custom_startpage", false)));
+
+        // Enable disable set start page item
+        if(!sharedPref.getBoolean("enable_custom_startpage", false)) {
+            Log.d("Toolbar", "Disable menu item");
+
+            menu.findItem(R.id.setasstartpage).setVisible(false);
+
+        }
+        else {
+            Log.d("Toolbar", "Enable menu item");
+        }
+
+        if(dissableAllImages) {
+            menu.findItem(R.id.dissableAllImages).setChecked(true);
+        } else {
+            menu.findItem(R.id.dissableAllImages).setChecked(false);
+        }
+
+
         return true;
     }
 
@@ -549,7 +958,10 @@ public class MainActivity extends AppCompatActivity {
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             switch (keyCode) {
                 case KeyEvent.KEYCODE_BACK:
-                    if (webview.canGoBack()) {
+                    if(drawer.isDrawerOpen()) {
+                        drawer.closeDrawer();
+                    }
+                    else if (webview.canGoBack()) {
                         webview.goBack();
                     } else {
                         finish();
@@ -592,10 +1004,84 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void run() {
                     //stuff that updates ui
-                    crossfadeToWebview();
+
                 }
             });
 
+        }
+
+        @JavascriptInterface
+        public void insertToInput(final String text) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    //stuff that updates ui
+                    webview.loadUrl("javascript:insertAtCaret('" + text + "')");
+
+                }
+            });
+
+            Toast.makeText(mActivity, "Smiley was added", Toast.LENGTH_SHORT).show();
+        }
+
+        @JavascriptInterface
+        public void copyToClipholder(String text) {
+            ClipboardManager clipboard = (ClipboardManager)
+                    getSystemService(Context.CLIPBOARD_SERVICE);
+
+            ClipData clip = ClipData.newPlainText("simple text", text);
+
+            clipboard.setPrimaryClip(clip);
+
+            Toast.makeText(mActivity, "Smiley was copied to clipboard", Toast.LENGTH_SHORT).show();
+        }
+
+        @JavascriptInterface
+        public void setupPagination(final String currentPage, final String totalPages) {
+            Log.d("DEBUG", "Update spinner");
+
+            currentpage = Integer.parseInt(currentPage);
+            totalpages = Integer.parseInt(totalPages);
+
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    paginationEnabled = true;
+                    toolbar_bottom.setVisibility(View.VISIBLE);
+                    // Update toolbar title and subsitle
+                    toolbar_bottom.setTitle(getString(R.string.currentpage));
+                    toolbar_bottom.setSubtitle(currentpage + " " + getString(R.string.of) + " " + totalpages);
+
+                }
+            });
+
+        }
+
+        @JavascriptInterface
+        public void disablePagination() {
+             paginationEnabled = false;
+
+        }
+
+        @JavascriptInterface
+        public void showPagination() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    showViews();
+                }
+            });
+
+        }
+
+        @JavascriptInterface
+        public void hidePagination() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    hideViews();
+                }
+            });
         }
 
         @JavascriptInterface
@@ -631,7 +1117,7 @@ public class MainActivity extends AppCompatActivity {
                         editor.remove("userid");
                         editor.apply();
 
-                        defaultProfile.withName("Not logged in").withIcon(R.drawable.placeholder);
+                        defaultProfile.withName(getString(R.string.not_logged_in)).withIcon(R.drawable.placeholder);
                         headerResult.updateProfile(defaultProfile);
                     }
                 });
@@ -641,27 +1127,19 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void crossfadeToWebview() {
-        pbc.animate()
-                .alpha(0f)
-                .setDuration(mShortAnimationDuration)
-                .setListener(new AnimatorListenerAdapter() {
-                    @Override
-                    public void onAnimationEnd(Animator animation) {
-                        pbc.setVisibility(View.GONE);
-                    }
-                });
+    private void hideViews() {
+        if(!paginationHidden) {
+            Log.d("Bottom Toolbar", "Hide toolbar");
+            paginationHidden = true;
+            toolbar_bottom.animate().translationY(toolbar_bottom.getHeight()).setInterpolator(new AccelerateInterpolator(2)).start();
+        }
     }
 
-    private void crossfadeToLoader() {
-        pbc.setVisibility(View.VISIBLE);
-
-        // Animate the content view to 100% opacity, and clear any animation
-        // listener set on the view.
-        pbc.animate()
-                .alpha(1f)
-                .setDuration(mShortAnimationDuration)
-                .setListener(null);
-
+    private void showViews() {
+        if(paginationHidden && paginationEnabled) {
+            Log.d("Bottom Toolbar", "show toolbar");
+            paginationHidden = false;
+            toolbar_bottom.animate().translationY(0).setInterpolator(new DecelerateInterpolator(2)).start();
+        }
     }
 }
